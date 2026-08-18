@@ -9,11 +9,12 @@ func ReadinessHandler(writer http.ResponseWriter, req *http.Request) {
 	writer.WriteHeader(http.StatusOK)
 	_, err := writer.Write([]byte("OK"))
 	if err != nil {
-		fmt.Errorf("Error in readiness handler body write: %w", err)
+		err := fmt.Errorf("Error in readiness handler body write: %w", err)
+		fmt.Println(err.Error())
 	}
 }
 
-func main() {
+func main() { 
 	serveMux := http.NewServeMux()
 	strippedPathHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
 	serveMux.Handle("/app/", strippedPathHandler)
@@ -24,6 +25,7 @@ func main() {
 	}
 	err := server.ListenAndServe()
 	if err != nil {
-		fmt.Errorf("%w",err)
+		err := fmt.Errorf("Error in listen and serve %w: ",err)
+		fmt.Println(err.Error())
 	}
 }
