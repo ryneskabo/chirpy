@@ -55,13 +55,13 @@ func main() {
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(strippedPathHandler))
 
 	// Handles Readiness Endpoint, shows if server is up and running
-	serveMux.HandleFunc("/healthz", ReadinessHandler)
+	serveMux.HandleFunc("GET /healthz", ReadinessHandler)
 
 	// Handles Hits Metrics Endpoint, shows how many hits since last reset
-	serveMux.HandleFunc("/metrics", apiCfg.HitsHandler)
+	serveMux.HandleFunc("GET /metrics", apiCfg.HitsHandler)
 
 	// Handles reset Metrics Endpoint, resets the number of hits
-	serveMux.HandleFunc("/reset", apiCfg.ResetHitsHandler)
+	serveMux.HandleFunc("POST /reset", apiCfg.ResetHitsHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
