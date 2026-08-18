@@ -4,9 +4,20 @@ import ("fmt";
 	"net/http";
 )
 
+func ReadinessHandler(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	writer.WriteHeader(http.StatusOK)
+	_, err := writer.Write([]byte("OK"))
+	if err != nil {
+		fmt.Errorf("Error in readiness handler body write: %w", err)
+	}
+}
+
 func main() {
 	serveMux := http.NewServeMux()
-	serveMux.Handle("/", http.FileServer(http.Dir(".")))
+	strippedPathHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
+	serveMux.Handle("/app/", strippedPathHandler)
+	serveMux.HandleFunc("/healthz", ReadinessHandler)
 	server := http.Server{
 		Handler: serveMux,
 		Addr: ":8080",
