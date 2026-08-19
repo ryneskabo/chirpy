@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
+	"strings"
 )
 
 type apiConfig struct {
@@ -75,6 +76,24 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Write(dat)
 }
 
+func replaceProfaneWords(chirp string) string {
+	profaneWords := []string {
+		"kerfuffle",
+		"sharbert",
+		"fornax",
+	}
+	words := strings.Split(chirp, " ")
+	
+	for i, word := range words {
+		for _, profaneWord := range profaneWords {
+			if strings.ToLower(word) == strings.ToLower(profaneWord) {
+				words[i] = "****"
+			}
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
 	type chirp struct {
 		Body string `json:"body"`
@@ -91,12 +110,13 @@ func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
 		respondWithError(writer, 400, "Chirp is too long")
 		return
 	}
+	cleanedChirp := replaceProfaneWords(chirpReq.Body)
 
 	type ValidResponse struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 	respondWithJSON(writer, 200, ValidResponse{
-		Valid: true,
+		CleanedBody: cleanedChirp,
 	})
 }
 
