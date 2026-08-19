@@ -9,8 +9,9 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
-
 	"github.com/joho/godotenv"
+	"github.com/google/uuid"
+	"time"
 	_ "github.com/lib/pq"
 	"github.com/ryneskabo/chirpy/internal/database"
 )
@@ -18,6 +19,13 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	queries database.Queries
+	platform string
+}
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -56,7 +64,14 @@ func (cfg *apiConfig) MetricsHandler(writer http.ResponseWriter, req *http.Reque
 	}
 }
 
-func (cfg *apiConfig) ResetMetricsHandler(writer http.ResponseWriter, req *http.Request) {
+func (cfg *apiConfig) ResetHandler(writer http.ResponseWriter, req *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(writer, 403, "Forbidden")
+	}
+	err := cfg.queries.DeleteAllUsers(req.Context())	
+	if err != nil {
+		respondWithError(writer, 500, "Could not reset user table")
+	}
 	writer.WriteHeader(http.StatusOK)
 	cfg.fileserverHits.Store(0)
 }
@@ -127,9 +142,39 @@ func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
 	})
 }
 
+func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
+	type UserCreationRequest struct {
+		Email string `json:"email"`
+	} 
+	decoder := json.NewDecoder(req.Body)
+	userReq := UserCreationRequest{}
+	err := decoder.Decode(&userReq)
+	if err != nil {
+		respondWithError(writer, 400, "Did not match constraints: Only expected email")
+	}
+
+	user, err := cfg.queries.CreateUser(req.Context(), userReq.Email)
+	if err != nil {
+		respondWithError(writer, 500, "Could not create user")
+	}
+	createdUser := User {
+		ID: user.ID.UUID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email: user.Email,
+	}
+	dat, err := json.Marshal(createdUser)
+	if err != nil {
+		respondWithError(writer, 500, "Internal server error")
+		log.Printf("Couldn't marshal json when creating user: %v error: %v", dat, err)
+	}
+	respondWithJSON(writer, 201, createdUser)
+}
+
 func main() { 
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
+	requestPlatform := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	dbQueries := database.New(db)
 	const port = "8080"
@@ -138,6 +183,7 @@ func main() {
 	strippedPathHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
 	apiCfg := apiConfig{
 		queries: *dbQueries,
+		platform: requestPlatform,
 	}
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(strippedPathHandler))
 
@@ -148,10 +194,13 @@ func main() {
 	serveMux.HandleFunc("GET /admin/metrics", apiCfg.MetricsHandler)
 
 	// Handles reset Metrics Endpoint, resets the number of hits
-	serveMux.HandleFunc("POST /admin/reset", apiCfg.ResetMetricsHandler)
+	serveMux.HandleFunc("POST /admin/reset", apiCfg.ResetHandler)
 
 	// Validates a Chirp (post)
 	serveMux.HandleFunc("POST /api/validate_chirp", ChirpValidationHandler)
+
+	// Creates a user
+	serveMux.HandleFunc("POST /api/users", apiCfg.userCreationHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
