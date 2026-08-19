@@ -29,10 +29,16 @@ func ReadinessHandler(writer http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (cfg *apiConfig) HitsHandler(writer http.ResponseWriter, req *http.Request) {
-	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+func (cfg *apiConfig) MetricsHandler(writer http.ResponseWriter, req *http.Request) {
+	writer.Header().Set("Content-Type", "text/html")
 	writer.WriteHeader(http.StatusOK)
-	hitsString := fmt.Sprintf("Hits: %d", cfg.fileserverHits.Load())
+	hitsString := fmt.Sprintf(`
+		<html>
+			<body>
+				<h1>Welcome, Chirpy Admin</h1>
+				<p>Chirpy has been visited %d times!</p>
+			</body>
+		</html>`, cfg.fileserverHits.Load())
 	_, err := writer.Write([]byte(hitsString))
 	if err != nil {
 		err := fmt.Errorf("Error in hits handler write: %w", err)
@@ -40,8 +46,7 @@ func (cfg *apiConfig) HitsHandler(writer http.ResponseWriter, req *http.Request)
 	}
 }
 
-func (cfg *apiConfig) ResetHitsHandler(writer http.ResponseWriter, req *http.Request) {
-	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+func (cfg *apiConfig) ResetMetricsHandler(writer http.ResponseWriter, req *http.Request) {
 	writer.WriteHeader(http.StatusOK)
 	cfg.fileserverHits.Store(0)
 }
@@ -55,13 +60,13 @@ func main() {
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(strippedPathHandler))
 
 	// Handles Readiness Endpoint, shows if server is up and running
-	serveMux.HandleFunc("GET /healthz", ReadinessHandler)
+	serveMux.HandleFunc("GET /api/healthz", ReadinessHandler)
 
 	// Handles Hits Metrics Endpoint, shows how many hits since last reset
-	serveMux.HandleFunc("GET /metrics", apiCfg.HitsHandler)
+	serveMux.HandleFunc("GET /admin/metrics", apiCfg.MetricsHandler)
 
 	// Handles reset Metrics Endpoint, resets the number of hits
-	serveMux.HandleFunc("POST /reset", apiCfg.ResetHitsHandler)
+	serveMux.HandleFunc("POST /admin/reset", apiCfg.ResetMetricsHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
