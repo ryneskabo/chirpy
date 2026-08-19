@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync/atomic"
 )
@@ -51,6 +53,53 @@ func (cfg *apiConfig) ResetMetricsHandler(writer http.ResponseWriter, req *http.
 	cfg.fileserverHits.Store(0)
 }
 
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	type errorResponse struct {
+		 ErrorResponse string `json:"error"`
+	}
+	errBody := errorResponse{
+		ErrorResponse: msg,
+	}
+	respondWithJSON(w, code, errBody)
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(dat)
+}
+
+func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
+	type chirp struct {
+		Body string `json:"body"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	chirpReq := chirp{}
+	err := decoder.Decode(&chirpReq)
+	if err != nil {
+		respondWithError(writer, 400, "Request did not match expected constraints")
+		return
+	}
+	if len(chirpReq.Body) > 140 {
+		respondWithError(writer, 400, "Chirp is too long")
+		return
+	}
+
+	type ValidResponse struct {
+		Valid bool `json:"valid"`
+	}
+	respondWithJSON(writer, 200, ValidResponse{
+		Valid: true,
+	})
+}
+
 func main() { 
 	const port = "8080"
 
@@ -67,6 +116,9 @@ func main() {
 
 	// Handles reset Metrics Endpoint, resets the number of hits
 	serveMux.HandleFunc("POST /admin/reset", apiCfg.ResetMetricsHandler)
+
+	// Validates a Chirp (post)
+	serveMux.HandleFunc("POST /api/validate_chirp", ChirpValidationHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
