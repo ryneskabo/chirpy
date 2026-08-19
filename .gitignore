@@ -1,1 +1,3 @@
 out
+.sqlfluff
+/sql/.sqls.yml
