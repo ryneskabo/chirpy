@@ -67,6 +67,7 @@ func (cfg *apiConfig) MetricsHandler(writer http.ResponseWriter, req *http.Reque
 func (cfg *apiConfig) ResetHandler(writer http.ResponseWriter, req *http.Request) {
 	if cfg.platform != "dev" {
 		respondWithError(writer, 403, "Forbidden")
+		return
 	}
 	cfg.fileserverHits.Store(0)
 	err := cfg.queries.DeleteAllUsers(req.Context())
