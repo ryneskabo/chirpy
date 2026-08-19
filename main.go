@@ -1,16 +1,23 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"sync/atomic"
+	"os"
 	"strings"
+	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/ryneskabo/chirpy/internal/database"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	queries database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -121,11 +128,17 @@ func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
 }
 
 func main() { 
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	dbQueries := database.New(db)
 	const port = "8080"
 
 	serveMux := http.NewServeMux()
 	strippedPathHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
-	apiCfg := apiConfig{}
+	apiCfg := apiConfig{
+		queries: *dbQueries,
+	}
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(strippedPathHandler))
 
 	// Handles Readiness Endpoint, shows if server is up and running
@@ -145,7 +158,7 @@ func main() {
 		Handler: serveMux,
 		Addr: ":" + port,
 	}
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		err := fmt.Errorf("Error in listen and serve %w: ",err)
 		fmt.Println(err.Error())

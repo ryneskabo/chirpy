@@ -1,3 +1,5 @@
+.env
 out
 .sqlfluff
 /sql/.sqls.yml
+chirpy
