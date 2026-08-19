@@ -28,6 +28,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type ValidChirpResponse struct {
+	ID uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body string `json:"body"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -44,6 +52,7 @@ func ReadinessHandler(writer http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		err := fmt.Errorf("Error in readiness handler body write: %w", err)
 		fmt.Println(err.Error())
+		return
 	}
 }
 
@@ -61,6 +70,7 @@ func (cfg *apiConfig) MetricsHandler(writer http.ResponseWriter, req *http.Reque
 	if err != nil {
 		err := fmt.Errorf("Error in hits handler write: %w", err)
 		fmt.Println(err)
+		return
 	}
 }
 
@@ -73,6 +83,7 @@ func (cfg *apiConfig) ResetHandler(writer http.ResponseWriter, req *http.Request
 	err := cfg.queries.DeleteAllUsers(req.Context())
 	if err != nil {
 		respondWithError(writer, 500, "Could not delete users")
+		return
 	}
 	writer.WriteHeader(http.StatusOK)
 }
@@ -117,13 +128,14 @@ func replaceProfaneWords(chirp string) string {
 	return strings.Join(words, " ")
 }
 
-func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
-	type chirp struct {
+func (cfg *apiConfig) ChirpHandler(writer http.ResponseWriter, req *http.Request) {
+	type chirpRequest struct {
 		Body string `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(req.Body)
-	chirpReq := chirp{}
+	chirpReq := chirpRequest{}
 	err := decoder.Decode(&chirpReq)
 	if err != nil {
 		respondWithError(writer, 400, "Request did not match expected constraints")
@@ -135,12 +147,22 @@ func ChirpValidationHandler(writer http.ResponseWriter, req *http.Request) {
 	}
 	cleanedChirp := replaceProfaneWords(chirpReq.Body)
 
-	type ValidResponse struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-	respondWithJSON(writer, 200, ValidResponse{
-		CleanedBody: cleanedChirp,
+	requestedChirp, err := cfg.queries.CreateChirp(req.Context(), database.CreateChirpParams{
+		Body: cleanedChirp,
+		UserID: uuid.NullUUID{UUID: chirpReq.UserID, Valid: true},
 	})
+	if err != nil {
+		respondWithError(writer, 500, "could not create chirp")
+		return
+	}
+	validChirp := ValidChirpResponse {
+		ID: requestedChirp.ID,
+		CreatedAt: requestedChirp.CreatedAt,
+		UpdatedAt: requestedChirp.UpdatedAt,
+		Body: cleanedChirp,
+		UserID: requestedChirp.UserID.UUID,
+	}
+	respondWithJSON(writer, 201, validChirp)
 }
 
 func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
@@ -152,14 +174,16 @@ func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.
 	err := decoder.Decode(&userReq)
 	if err != nil {
 		respondWithError(writer, 400, "Did not match constraints: Only expected email")
+		return
 	}
 
 	user, err := cfg.queries.CreateUser(req.Context(), userReq.Email)
 	if err != nil {
 		respondWithError(writer, 500, "Could not create user")
+		return
 	}
 	createdUser := User {
-		ID: user.ID.UUID,
+		ID: user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email: user.Email,
@@ -168,6 +192,7 @@ func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.
 	if err != nil {
 		respondWithError(writer, 500, "Internal server error")
 		log.Printf("Couldn't marshal json when creating user: %v error: %v", dat, err)
+		return
 	}
 	respondWithJSON(writer, 201, createdUser)
 }
@@ -177,6 +202,9 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	requestPlatform := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Printf("Error in opening database: %v", err)
+	}
 	dbQueries := database.New(db)
 	const port = "8080"
 
@@ -197,8 +225,8 @@ func main() {
 	// Handles reset Metrics Endpoint, resets the number of hits
 	serveMux.HandleFunc("POST /admin/reset", apiCfg.ResetHandler)
 
-	// Validates a Chirp (post)
-	serveMux.HandleFunc("POST /api/validate_chirp", ChirpValidationHandler)
+	// Validates and adds Chirp (post) to database
+	serveMux.HandleFunc("POST /api/chirps", apiCfg.ChirpHandler)
 
 	// Creates a user
 	serveMux.HandleFunc("POST /api/users", apiCfg.userCreationHandler)
