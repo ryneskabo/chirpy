@@ -268,7 +268,7 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 	hashedPassword, err := cfg.queries.GetPasswordByEmail(req.Context(), loginReq.Email)
 	if err != nil {
 		respondWithError(writer, 401, "Incorrect email or password")
-		log.Printf("Couldn't retrieve password from email.\nemail: %s\nerror: ", loginReq.Email, err)
+		log.Printf("Couldn't retrieve password from email.\nemail: %s\nerror: %v", loginReq.Email, err)
 		return
 	}
 	match, err := auth.CheckPasswordHash(loginReq.Password, hashedPassword)
