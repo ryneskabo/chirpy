@@ -14,6 +14,7 @@ import (
 	"time"
 	_ "github.com/lib/pq"
 	"github.com/ryneskabo/chirpy/internal/database"
+	"github.com/ryneskabo/chirpy/internal/auth"
 )
 
 type apiConfig struct {
@@ -213,16 +214,30 @@ func (cfg *apiConfig) getOneChirpHandler(writer http.ResponseWriter, req *http.R
 func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
 	type UserCreationRequest struct {
 		Email string `json:"email"`
+		Password string `json:"password"`
 	} 
 	decoder := json.NewDecoder(req.Body)
 	userReq := UserCreationRequest{}
 	err := decoder.Decode(&userReq)
 	if err != nil {
-		respondWithError(writer, 400, "Did not match constraints: Only expected email")
+		respondWithError(writer, 400, "Did not match constraints: expected email and password")
+		return
+	}
+	if userReq.Password == "" {
+		respondWithError(writer, 400, "No Password set, please set a password")
 		return
 	}
 
-	user, err := cfg.queries.CreateUser(req.Context(), userReq.Email)
+	hashedPassword, err := auth.HashPassword(userReq.Password)
+	if err != nil {
+		respondWithError(writer, 500, "Internal Server Error")
+		log.Print("Error hashing password")
+		return
+	}
+	user, err := cfg.queries.CreateUser(req.Context(), database.CreateUserParams{
+		Email: userReq.Email,
+		HashedPassword: hashedPassword,
+	})
 	if err != nil {
 		respondWithError(writer, 500, "Could not create user")
 		return
@@ -233,13 +248,48 @@ func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.
 		UpdatedAt: user.UpdatedAt,
 		Email: user.Email,
 	}
-	dat, err := json.Marshal(createdUser)
+	respondWithJSON(writer, 201, createdUser)
+}
+
+func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request) {
+	type LoginRequest struct {
+		Email string `json:"email"`
+		Password string `json:"password"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	loginReq := LoginRequest{}
+	err := decoder.Decode(&loginReq)
 	if err != nil {
-		respondWithError(writer, 500, "Internal server error")
-		log.Printf("Couldn't marshal json when creating user: %v error: %v", dat, err)
+		respondWithError(writer, 500, "Internal Server Error")
+		log.Printf("Error decoding login request: %s", err)
 		return
 	}
-	respondWithJSON(writer, 201, createdUser)
+
+	hashedPassword, err := cfg.queries.GetPasswordByEmail(req.Context(), loginReq.Email)
+	if err != nil {
+		respondWithError(writer, 401, "Incorrect email or password")
+		log.Printf("Couldn't retrieve password from email.\nemail: %s\nerror: ", loginReq.Email, err)
+		return
+	}
+	match, err := auth.CheckPasswordHash(loginReq.Password, hashedPassword)
+	if err != nil {
+		respondWithError(writer, 500, "Internal Server error")
+		log.Printf("Error checking password hash: %v", err)
+		return
+	}
+	if !match {
+		respondWithError(writer, 401, "Incorrect email or password")
+		log.Printf("Non matching password from email: %s", loginReq.Email)
+		return
+	}
+	user, err := cfg.queries.GetUserByEmail(req.Context(), loginReq.Email)
+	jsonableUser := User {
+		Email: user.Email,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		ID: user.ID,
+	}
+	respondWithJSON(writer, 200, jsonableUser)
 }
 
 func main() { 
@@ -281,6 +331,9 @@ func main() {
 
 	// Gets One chirp
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirpHandler)
+
+	// Handles Logins
+	serveMux.HandleFunc("POST /api/login", apiCfg.loginHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
