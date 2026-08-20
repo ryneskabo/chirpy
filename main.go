@@ -165,6 +165,51 @@ func (cfg *apiConfig) ChirpHandler(writer http.ResponseWriter, req *http.Request
 	respondWithJSON(writer, 201, validChirp)
 }
 
+func (cfg *apiConfig) getAllChirpsHandler(writer http.ResponseWriter, req *http.Request) {
+	chirps, err := cfg.queries.GetAllChirps(req.Context())
+	if err != nil {
+		respondWithError(writer, 500, "Internal server error")
+		log.Printf("Couldn't retrieve all chirps error: %v", err)
+		return
+	}
+
+	jsonableChirps := []ValidChirpResponse{}
+	for _, chirp := range chirps {
+		jsonableChirp := ValidChirpResponse {
+			ID: chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body: chirp.Body,
+			UserID: chirp.UserID.UUID,
+		}
+		jsonableChirps = append(jsonableChirps, jsonableChirp)
+	}
+	respondWithJSON(writer, 200, jsonableChirps)
+}
+
+func (cfg *apiConfig) getOneChirpHandler(writer http.ResponseWriter, req *http.Request) {
+	stringIdOfChirp := req.PathValue("chirpID")
+	idOfChirp, err := uuid.Parse(stringIdOfChirp)
+	if err != nil {
+		respondWithError(writer, 400, "Invalid UUID for chirp")
+		log.Printf("Error parsing UUID: %v", err)
+		return
+	}
+	chirp, err := cfg.queries.GetOneChirp(req.Context(), idOfChirp)
+	if err != nil {
+		respondWithError(writer, 404, "Chirp not found")
+		return
+	}
+	jsonableChirp := ValidChirpResponse{
+		ID: chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body: chirp.Body,
+		UserID: chirp.UserID.UUID,
+	}
+	respondWithJSON(writer, 200, jsonableChirp)
+}
+
 func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
 	type UserCreationRequest struct {
 		Email string `json:"email"`
@@ -230,6 +275,12 @@ func main() {
 
 	// Creates a user
 	serveMux.HandleFunc("POST /api/users", apiCfg.userCreationHandler)
+
+	// Gets all chirps
+	serveMux.HandleFunc("GET /api/chirps", apiCfg.getAllChirpsHandler)
+
+	// Gets One chirp
+	serveMux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getOneChirpHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
