@@ -70,6 +70,9 @@ func main() {
 
 	// Handles Revoking Refresh Token
 	serveMux.HandleFunc("POST /api/revoke", apiCfg.RevokeTokenHandler)
+	
+	// Handles Updating User Email and Password
+	serveMux.HandleFunc("PUT /api/users", apiCfg.UpdateUserEmailAndPasswordHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{

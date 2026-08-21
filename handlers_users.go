@@ -109,7 +109,7 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 	refreshToken, err := cfg.queries.CreateRefreshToken(req.Context(), database.CreateRefreshTokenParams{
 		Token: auth.MakeRefreshToken(),
 		UserID: uuid.NullUUID{
-			UUID: user.ID,
+			UUID:  user.ID,
 			Valid: true,
 		},
 		ExpiresAt: time.Now().Add(time.Hour * time.Duration(1440)),
@@ -120,13 +120,71 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 	}
 
 	jsonableUser := User{
-		Email:     user.Email,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		ID:        user.ID,
-		AccessToken:     jwt,
+		Email:        user.Email,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		ID:           user.ID,
+		AccessToken:  jwt,
 		RefreshToken: refreshToken.Token,
 	}
 	respondWithJSON(writer, 200, jsonableUser)
+}
+
+func (cfg *apiConfig) UpdateUserEmailAndPasswordHandler(writer http.ResponseWriter, req *http.Request) {
+	type UpdateUserEmailAndPasswordRequest struct {
+		Password string `json:"password"`
+		Email    string `json:"email"` 
+	}
+	accessToken, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(writer, 401, "could not get token")
+		return
+	}
+	userID, err := auth.ValidateJWT(accessToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(writer, 401, "unauthorized")
+		return
+	}
+
+	decoder := json.NewDecoder(req.Body)
+
+	var updateRequest UpdateUserEmailAndPasswordRequest
+	err = decoder.Decode(&updateRequest)
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't decode update user email and password request: %v", err)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(updateRequest.Password)
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't hash password: %v", err)
+		return
+	}
+	user, err := cfg.queries.UpdateUserEmailAndPassword(req.Context(), database.UpdateUserEmailAndPasswordParams{
+		ID: userID,
+		Email: updateRequest.Email,
+		HashedPassword: hashedPassword,
+	})
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't update user email and password in database %v", err)
+		return
+	}
+
+	type updateResponse struct {
+		ID        uuid.UUID `json:"id"`
+		Email     string    `json:"email"`
+		UpdatedAt time.Time `json:"updated_at"`
+		CreatedAt time.Time `json:"created_at"`	
+	}
+	res := updateResponse {
+		ID: user.ID,
+		Email: user.Email,
+		UpdatedAt: user.UpdatedAt,
+		CreatedAt: user.CreatedAt,
+	}
+	respondWithJSON(writer, http.StatusOK, res)
 }
 
