@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/ryneskabo/chirpy/internal/auth"
@@ -87,7 +88,7 @@ func (cfg *apiConfig) ChirpHandler(writer http.ResponseWriter, req *http.Request
 	respondWithJSON(writer, 201, validChirp)
 }
 
-func (cfg *apiConfig) getAuthorChirps(writer http.ResponseWriter, req *http.Request, authorID string) {
+func (cfg *apiConfig) getAuthorChirps(writer http.ResponseWriter, req *http.Request, authorID string) []ValidChirpResponse {
 	authorUUID, err := uuid.Parse(authorID)
 	if err != nil {
 		respondWithError(writer, 400, "invalid uuid")
@@ -98,12 +99,12 @@ func (cfg *apiConfig) getAuthorChirps(writer http.ResponseWriter, req *http.Requ
 	})
 	if err == sql.ErrNoRows {
 		respondWithError(writer, 404, "author doesn't exist or has no chirps")
-		return
+		return nil
 	}
 	if err != nil {
 		respondWithError(writer, 500, "internal server error")
 		log.Printf("couldn't get author chirps: %v", err)
-		return
+		return nil
 	}
 	
 	jsonableChirps := []ValidChirpResponse{}
@@ -117,13 +118,23 @@ func (cfg *apiConfig) getAuthorChirps(writer http.ResponseWriter, req *http.Requ
 		}
 		jsonableChirps = append(jsonableChirps, jsonableChirp)
 	}
-	respondWithJSON(writer, 200, jsonableChirps)
+	return jsonableChirps
 }
 
 func (cfg *apiConfig) getAllChirpsHandler(writer http.ResponseWriter, req *http.Request) {
 	authorID := req.URL.Query().Get("author_id")
+	sortParam := req.URL.Query().Get("sort")
+	if sortParam == "" {
+		sortParam = "asc"
+	}
 	if authorID != "" {
-		cfg.getAuthorChirps(writer, req, authorID)
+		chirps := cfg.getAuthorChirps(writer, req, authorID)
+		if sortParam != "desc" {
+			respondWithJSON(writer, 200, chirps)
+			return
+		}
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+		respondWithJSON(writer, 200, chirps)
 		return
 	}
 	chirps, err := cfg.queries.GetAllChirps(req.Context())
@@ -144,6 +155,11 @@ func (cfg *apiConfig) getAllChirpsHandler(writer http.ResponseWriter, req *http.
 		}
 		jsonableChirps = append(jsonableChirps, jsonableChirp)
 	}
+	if sortParam != "desc" {
+		respondWithJSON(writer, 200, jsonableChirps)
+		return
+	}
+	sort.Slice(jsonableChirps, func(i, j int) bool { return jsonableChirps[i].CreatedAt.After(jsonableChirps[j].CreatedAt) })
 	respondWithJSON(writer, 200, jsonableChirps)
 }
 
