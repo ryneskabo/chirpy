@@ -12,11 +12,12 @@ import (
 )
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	AccessToken  string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
@@ -63,7 +64,6 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 	type LoginRequest struct {
 		Email            string `json:"email"`
 		Password         string `json:"password"`
-		ExpiresInSeconds *int   `json:"expires_in_seconds"`
 	}
 	decoder := json.NewDecoder(req.Body)
 	loginReq := LoginRequest{}
@@ -99,26 +99,34 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 		return
 	}
 
-	var secondsUntilExpiration int
-	if loginReq.ExpiresInSeconds == nil {
-		secondsUntilExpiration = 3600
-	} else if *loginReq.ExpiresInSeconds > 3600 {
-		secondsUntilExpiration = 3600
-	} else {
-		secondsUntilExpiration = *loginReq.ExpiresInSeconds
-	}
-	jwt, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Second*time.Duration(secondsUntilExpiration))
+	jwt, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Hour)
 	if err != nil {
 		respondWithError(writer, 500, "Internal Server error")
 		log.Printf("couldn't make jwt: %v", err)
 		return
 	}
+
+	refreshToken, err := cfg.queries.CreateRefreshToken(req.Context(), database.CreateRefreshTokenParams{
+		Token: auth.MakeRefreshToken(),
+		UserID: uuid.NullUUID{
+			UUID: user.ID,
+			Valid: true,
+		},
+		ExpiresAt: time.Now().Add(time.Hour * time.Duration(1440)),
+	})
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't put refresh token in db: %v", err)
+	}
+
 	jsonableUser := User{
 		Email:     user.Email,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		ID:        user.ID,
-		Token:     jwt,
+		AccessToken:     jwt,
+		RefreshToken: refreshToken.Token,
 	}
 	respondWithJSON(writer, 200, jsonableUser)
 }
+

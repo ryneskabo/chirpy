@@ -65,6 +65,12 @@ func main() {
 	// Handles Logins
 	serveMux.HandleFunc("POST /api/login", apiCfg.loginHandler)
 
+	// Handles Refreshing JWT
+	serveMux.HandleFunc("POST /api/refresh", apiCfg.RefreshTokenHandler)
+
+	// Handles Revoking Refresh Token
+	serveMux.HandleFunc("POST /api/revoke", apiCfg.RevokeTokenHandler)
+
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
 		Handler: serveMux,
