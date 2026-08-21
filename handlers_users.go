@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -18,6 +20,7 @@ type User struct {
 	Email        string    `json:"email"`
 	AccessToken  string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
+	IsChirpyRed  bool   `json:"is_chirpy_red"`
 }
 
 func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.Request) {
@@ -56,6 +59,7 @@ func (cfg *apiConfig) userCreationHandler(writer http.ResponseWriter, req *http.
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 	respondWithJSON(writer, 201, createdUser)
 }
@@ -126,6 +130,7 @@ func (cfg *apiConfig) loginHandler(writer http.ResponseWriter, req *http.Request
 		ID:           user.ID,
 		AccessToken:  jwt,
 		RefreshToken: refreshToken.Token,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 	respondWithJSON(writer, 200, jsonableUser)
 }
@@ -174,17 +179,61 @@ func (cfg *apiConfig) UpdateUserEmailAndPasswordHandler(writer http.ResponseWrit
 	}
 
 	type updateResponse struct {
-		ID        uuid.UUID `json:"id"`
-		Email     string    `json:"email"`
-		UpdatedAt time.Time `json:"updated_at"`
-		CreatedAt time.Time `json:"created_at"`	
+		ID          uuid.UUID `json:"id"`
+		Email       string    `json:"email"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		CreatedAt   time.Time `json:"created_at"`	
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 	res := updateResponse {
-		ID: user.ID,
-		Email: user.Email,
-		UpdatedAt: user.UpdatedAt,
-		CreatedAt: user.CreatedAt,
+		ID:          user.ID,
+		Email:       user.Email,
+		UpdatedAt:   user.UpdatedAt,
+		CreatedAt:   user.CreatedAt,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 	respondWithJSON(writer, http.StatusOK, res)
 }
 
+func (cfg *apiConfig) UpgradeUserToChirpyRedHandler(writer http.ResponseWriter, req *http.Request) {
+	apiKey, err := auth.GetApiKey(req.Header)
+	if err != nil {
+		respondWithError(writer, 401, fmt.Sprintf("%v", err))
+		return
+	}
+	if apiKey != cfg.polkaKey {
+		respondWithError(writer, 401, fmt.Sprintf("%v", err))
+	}
+	type UpgradeData struct {
+		UserID uuid.UUID `json:"user_id"`
+	}
+	type UpgradeRequest struct {
+		Event string      `json:"event"`
+		Data  UpgradeData `json:"data"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	upgradeReq := UpgradeRequest{}
+	err = decoder.Decode(&upgradeReq)
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't decode upgrade to chirpy red request: %v", err)
+		return
+	}
+	if upgradeReq.Event != "user.upgraded" {
+		respondWithJSON(writer, 204, nil)
+		return
+	}
+
+	err = cfg.queries.UpgradeUserToChirpyRed(req.Context(), upgradeReq.Data.UserID)
+	if err == sql.ErrNoRows {
+		respondWithError(writer, 404, fmt.Sprintf("user not found with id %s", upgradeReq.Data.UserID.String()))
+		return
+	}
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't upgrade user with id %s to chirpy red\nerror: %v", upgradeReq.Data.UserID.String(), err)
+		return
+	}
+	respondWithJSON(writer, 204, nil)
+}

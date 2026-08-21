@@ -18,6 +18,7 @@ type apiConfig struct {
 	queries        database.Queries
 	platform       string
 	jwtSecret      string
+	polkaKey       string
 }
 
 func main() {
@@ -25,6 +26,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	requestPlatform := os.Getenv("PLATFORM")
 	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("Error in opening database: %v", err)
@@ -38,6 +40,7 @@ func main() {
 		queries:   *dbQueries,
 		platform:  requestPlatform,
 		jwtSecret: jwtSecret,
+		polkaKey: polkaKey,
 	}
 	serveMux.Handle("/app/", apiCfg.middlewareMetricsInc(strippedPathHandler))
 
@@ -76,6 +79,9 @@ func main() {
 
 	// Handles Deleting A Chirp
 	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.DeleteChirpHandler)
+
+	// Handles Upgrading A User To Chirpy Red
+	serveMux.HandleFunc("POST /api/polka/webhooks", apiCfg.UpgradeUserToChirpyRedHandler)
 
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{

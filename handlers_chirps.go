@@ -87,7 +87,45 @@ func (cfg *apiConfig) ChirpHandler(writer http.ResponseWriter, req *http.Request
 	respondWithJSON(writer, 201, validChirp)
 }
 
+func (cfg *apiConfig) getAuthorChirps(writer http.ResponseWriter, req *http.Request, authorID string) {
+	authorUUID, err := uuid.Parse(authorID)
+	if err != nil {
+		respondWithError(writer, 400, "invalid uuid")
+	}
+	chirps, err := cfg.queries.GetAuthorChirps(req.Context(), uuid.NullUUID{
+		UUID: authorUUID,
+		Valid: true,
+	})
+	if err == sql.ErrNoRows {
+		respondWithError(writer, 404, "author doesn't exist or has no chirps")
+		return
+	}
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't get author chirps: %v", err)
+		return
+	}
+	
+	jsonableChirps := []ValidChirpResponse{}
+	for _, chirp := range chirps {
+		jsonableChirp := ValidChirpResponse{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID.UUID,
+		}
+		jsonableChirps = append(jsonableChirps, jsonableChirp)
+	}
+	respondWithJSON(writer, 200, jsonableChirps)
+}
+
 func (cfg *apiConfig) getAllChirpsHandler(writer http.ResponseWriter, req *http.Request) {
+	authorID := req.URL.Query().Get("author_id")
+	if authorID != "" {
+		cfg.getAuthorChirps(writer, req, authorID)
+		return
+	}
 	chirps, err := cfg.queries.GetAllChirps(req.Context())
 	if err != nil {
 		respondWithError(writer, 500, "Internal server error")
