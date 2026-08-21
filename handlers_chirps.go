@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -112,8 +113,8 @@ func (cfg *apiConfig) getOneChirpHandler(writer http.ResponseWriter, req *http.R
 	stringIdOfChirp := req.PathValue("chirpID")
 	idOfChirp, err := uuid.Parse(stringIdOfChirp)
 	if err != nil {
-		respondWithError(writer, 400, "Invalid UUID for chirp")
-		log.Printf("Error parsing UUID: %v", err)
+		respondWithError(writer, 400, "invalid uuid for chirp")
+		log.Printf("error parsing uuid: %v", err)
 		return
 	}
 	chirp, err := cfg.queries.GetOneChirp(req.Context(), idOfChirp)
@@ -129,4 +130,47 @@ func (cfg *apiConfig) getOneChirpHandler(writer http.ResponseWriter, req *http.R
 		UserID:    chirp.UserID.UUID,
 	}
 	respondWithJSON(writer, 200, jsonableChirp)
+}
+
+func (cfg *apiConfig) DeleteChirpHandler(writer http.ResponseWriter, req *http.Request) {
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		respondWithError(writer, 401, "not found")
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(writer, 401, "not found")
+		return
+	}
+
+	stringIdOfChirp := req.PathValue("chirpID")
+	idOfChirp, err := uuid.Parse(stringIdOfChirp)
+	if err != nil {
+		respondWithError(writer, 400, "invalid uuid for chirp")
+		log.Printf("Error parsing UUID: %v", err)
+		return
+	}
+
+	chirp, err := cfg.queries.GetOneChirp(req.Context(), idOfChirp)
+	if err == sql.ErrNoRows {
+		respondWithError(writer, 404, "not found")
+		return
+	}
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		return
+	}
+	if userID != chirp.UserID.UUID {
+		respondWithError(writer, 403, "forbidden")
+		return
+	}
+	err = cfg.queries.DeleteAChirp(req.Context(), chirp.ID)
+	if err != nil {
+		respondWithError(writer, 500, "internal server error")
+		log.Printf("couldn't delete chirp: %v", err)
+		return
+	}
+	respondWithJSON(writer, 204, nil)
 }

@@ -74,6 +74,9 @@ func main() {
 	// Handles Updating User Email and Password
 	serveMux.HandleFunc("PUT /api/users", apiCfg.UpdateUserEmailAndPasswordHandler)
 
+	// Handles Deleting A Chirp
+	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.DeleteChirpHandler)
+
 	// Initializes server struct and starts it using the serveMux handler
 	server := http.Server{
 		Handler: serveMux,
